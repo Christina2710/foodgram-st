@@ -11,17 +11,23 @@ https://docs.djangoproject.com/en/3.2/ref/settings/
 """
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-AUTH_USER_MODEL = 'users.MyUser'
+AUTH_USER_MODEL = 'recipes.CustomUser'
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/3.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-v51szu(r8v34qvx2pa8i$r!_kaq(b2trc(_j8q8m1$*&u!0fd*'
+
+# Загрузить переменные окружения из файла .env
+load_dotenv()
+
+# Получить значение переменной DJANGO_SECRET_KEY
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -32,14 +38,13 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    'recipes.apps.RecipesConfig',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'recipes.apps.RecipesConfig',
-    'users.apps.UsersConfig',
     'foodgram_api.apps.FoodgramApiConfig',
     'rest_framework.authtoken',
     'rest_framework',
@@ -166,9 +171,8 @@ REST_FRAMEWORK = {
 
 DJOSER = {
     'SERIALIZERS': {
-        'user': 'foodgram_api.serializers.MyUserSerializer',
-        'current_user': 'foodgram_api.serializers.MyUserSerializer',
-        'user_create': 'foodgram_api.serializers.CreateUserSerializer',
+        'user': 'foodgram_api.serializers.CustomUserSerializer',
+        'current_user': 'foodgram_api.serializers.CustomUserSerializer',
     },
     'PERMISSIONS': {
         'user_list': ['rest_framework.permissions.IsAuthenticatedOrReadOnly'],

@@ -9,6 +9,12 @@
 git clone https://github.com/Christina2710/foodgram-st.git
 ```
 Перейдите в директорию infra и создайте файл .env на примере .env.example.
+```
+cd infra
+```
+```
+touch .env
+```
 Запустите проект с помощью
 ```
 docker-compose up 
@@ -17,11 +23,10 @@ docker-compose up
 ```
 docker-compose exec backend python manage.py migrate 
 ```
-Заполните базу данных тестовыми данными и ингредиентами
+Заполните базу данных ингредиентами
 ```
-docker-compose exec backend python manage.py loaddata test_data.json
+docker-compose exec backend python manage.py import_ingredients
 ```
-
-http://localhost — интерфейс веб-приложения
-http://localhost/api/docs/ — спецификация API
-http://localhost/admin/ — администрирование
+[Интерфейс веб-приложения](http://localhost)
+[Спецификация API](http://localhost/api/docs/)
+[Администрирование](http://localhost/admin/)

@@ -3,17 +3,56 @@ from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator
 
 
-User = get_user_model()
+from django.contrib.auth.models import AbstractUser
+from django.db import models
+from django.core.validators import RegexValidator
+from django.conf import settings
+
+
+MIN_COOKING_TIME = 1
+
+
+class CustomUser(AbstractUser):
+    email = models.EmailField(
+        max_length=254,
+        unique=True,
+        verbose_name='Адрес электронной почты'
+    )
+    first_name = models.CharField(max_length=150, verbose_name='Имя')
+    last_name = models.CharField(max_length=150, verbose_name='Фамилия')
+    username = models.CharField(max_length=150, unique=True, validators=[
+        RegexValidator(
+            regex=r'^[\w.@+-]+$',
+            message='Имя пользователя может содержать только'
+                  + 'буквы, цифры, и символы: . @ + - _'
+        )
+    ],
+        verbose_name='Имя пользователя'
+    )
+    # Поле для аватара
+    avatar = models.ImageField(
+        upload_to='avatar_images',
+        blank=True,
+        verbose_name='Аватар'
+    )
+    # Поле, указанное в USERNAME_FIELD считается обязательным.
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = ('username', 'first_name', 'last_name')
+
+    class Meta:
+        ordering = ('first_name', 'last_name')  # Указываем поля для сортировки
+        verbose_name = 'Пользователь'
+        verbose_name_plural = 'Пользователи'
 
 
 class Recipe(models.Model):
     author = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='recipes',
         verbose_name='Автор рецепта'
     )
-    name = models.CharField(max_length=256)
+    name = models.CharField(max_length=256, verbose_name='Название')
     image = models.ImageField(
         upload_to='recipes_images',
         verbose_name='Картинка'
@@ -22,12 +61,13 @@ class Recipe(models.Model):
     ingredients = models.ManyToManyField(
         'Ingredient',
         through='RecipeIngredient',
+        related_name='recipes_with_ingredient',
         verbose_name='Ингредиенты',
     )
-    cooking_time = models.PositiveSmallIntegerField(
+    cooking_time = models.PositiveIntegerField(
         help_text="Время приготовления в минутах",
         verbose_name='Время приготовления',
-        validators=(MinValueValidator(1),)
+        validators=(MinValueValidator(MIN_COOKING_TIME),)
     )
     pub_date = models.DateTimeField(auto_now_add=True)
 
@@ -48,8 +88,14 @@ class Ingredient(models.Model):
     )
 
     class Meta:
-        verbose_name = 'ингредиент'
-        verbose_name_plural = 'Ингредиенты'
+        verbose_name = 'продукт'
+        verbose_name_plural = 'Продукты'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['name', 'measurement_unit'],
+                name='unique_ingredient_measurement'
+            )
+        ]
 
     def __str__(self):
         return self.name
@@ -64,18 +110,18 @@ class RecipeIngredient(models.Model):
     )
     ingredient = models.ForeignKey(
         Ingredient,
-        related_name='recipes',
+        related_name='recipe_ingredients',
         on_delete=models.CASCADE,
-        verbose_name='Ингредиент'
+        verbose_name='Продукт'
     )
     amount = models.IntegerField(
-        verbose_name='Количество',
-        validators=(MinValueValidator(1),)
+        verbose_name='Мера',
+        validators=(MinValueValidator(MIN_COOKING_TIME),)
     )
 
     class Meta:
-        verbose_name = 'ингредиент рецепта'
-        verbose_name_plural = 'Ингредиенты рецепта'
+        verbose_name = 'продукт рецепта'
+        verbose_name_plural = 'Продукты рецепта'
 
     def __str__(self):
         return (f'{self.ingredient.name}: '
@@ -83,74 +129,72 @@ class RecipeIngredient(models.Model):
                 f'{self.ingredient.measurement_unit}')
 
 
-class FavoriteRecipe(models.Model):
+class AbstractRecipeRelation(models.Model):
     user = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='favorite_recipes',
+        # Используется динамическое имя для related_name
+        related_name='%(class)ss',
         verbose_name='Пользователь'
     )
     recipe = models.ForeignKey(
         Recipe,
         on_delete=models.CASCADE,
-        related_name='favorited_by',
+        # Используется динамическое имя для related_name
+        related_name='%(class)ss',
         verbose_name='Рецепт'
     )
 
+    class Meta:
+        abstract = True
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'recipe'],
+                name='unique_user_recipe'
+            )
+        ]
+
+    def __str__(self):
+        return f'{self.user.username} - {self.recipe.name}'
+
+
+class FavoriteRecipe(AbstractRecipeRelation):
     class Meta:
         verbose_name = 'избранный рецепт'
         verbose_name_plural = 'Избранные рецепты'
-        # Чтобы один пользователь не мог добавить рецепт в избранное дважды
-        unique_together = ('user', 'recipe')
-
-    def __str__(self):
-        return f"{self.user.username} - {self.recipe.name}"
 
 
-class ShoppingCart(models.Model):
-    user = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name='shopping_cart',
-        verbose_name='Пользователь'
-    )
-    recipe = models.ForeignKey(
-        Recipe,
-        on_delete=models.CASCADE,
-        related_name='in_shopping_cart_of',
-        verbose_name='Рецепт'
-    )
-
+class ShoppingCart(AbstractRecipeRelation):
     class Meta:
         verbose_name = 'рецепт в корзине'
         verbose_name_plural = 'Рецепты в корзине'
-        # Чтобы рецепт не мог быть добавлен в корзину дважды одним пользователем
-        unique_together = ('user', 'recipe')
-
-    def __str__(self):
-        return f"{self.user.username} - {self.recipe.name}"
 
 
 class Subscribe(models.Model):
     # Это пользователь, который совершает действие подписки
     user = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='subscriptions',
+        related_name='subscribed_to_users',
         verbose_name='Пользователь'
     )
     # Это пользователь, на которого совершается подписка
-    subscribed_to = models.ForeignKey(
-        User,
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='subscribers',
-        verbose_name='Подписка'
+        related_name='authors',
+        verbose_name='Автор'
     )
 
     class Meta:
-        unique_together = ("user", "subscribed_to")
         verbose_name = 'подписка'
         verbose_name_plural = 'Подписки'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'author'],
+                name='unique_user_subscription'
+            )
+        ]
 
     def __str__(self):
-        return f"{self.user.username} - {self.subscribed_to.username}"
+        return f'{self.user.username} - {self.author.username}'
