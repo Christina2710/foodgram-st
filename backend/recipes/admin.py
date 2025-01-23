@@ -4,6 +4,8 @@ from .models import (Recipe, Ingredient, FavoriteRecipe,
 from django.contrib.auth import get_user_model
 from django.utils.safestring import mark_safe
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.utils.html import format_html
+
 
 User = get_user_model()
 
@@ -56,12 +58,12 @@ class RecipeAdmin(admin.ModelAdmin):
     @mark_safe
     def get_ingredients_html(self, recipe):
         ingredients = recipe.recipe_ingredients.all()
-        ingredients_list = ''.join(
-            f'<li>{ingredient.ingredient.name} - {ingredient.amount} '
-            f'{ingredient.ingredient.measurement_unit}</li>'
+        ingredients_list = '<br>'.join(
+            f'{ingredient.ingredient.name} - {ingredient.amount} '
+            f'{ingredient.ingredient.measurement_unit}'
             for ingredient in ingredients
         )
-        return f'<ul>{ingredients_list}</ul>'
+        return f'{ingredients_list}'
 
     # Метод для отображения изображения в HTML-формате
     @admin.display(description='Картинка')
@@ -77,23 +79,54 @@ class IngredientAdmin(admin.ModelAdmin):
     list_filter = ('measurement_unit',)
 
 
-@admin.register(FavoriteRecipe)
-class FavoriteRecipeAdmin(admin.ModelAdmin):
-    list_display = ('user', 'recipe')
-    search_fields = ('user__username', 'recipe__name')
-
-
-@admin.register(ShoppingCart)
-class ShoppingCartAdmin(admin.ModelAdmin):
+@admin.register(FavoriteRecipe, ShoppingCart)
+class FavoriteShoppingCartAdmin(admin.ModelAdmin):
     list_display = ('user', 'recipe')
     search_fields = ('user__username', 'recipe__name')
 
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    list_display = ('username', 'email', 'date_joined')
+    list_display = (
+        'id',
+        'username',
+        'email',
+        'full_name',
+        'avatar',
+        'is_staff',
+        'recipe_count',
+        'subscription_count',
+        'follower_count',
+        'date_joined'
+    )
     search_fields = ('username', 'email')
     list_filter = ('date_joined', 'is_staff')
+
+    @admin.display(description='ФИО')
+    def full_name(self, user):
+        return f'{user.first_name} {user.last_name}'.strip()
+
+    @admin.display(description='Аватар')
+    @mark_safe
+    def avatar(self, user):
+        if user.avatar_url:
+            return format_html(
+                f'<img src="{user.avatar_url}" '
+                f'style="width: 50px; height: 50px; border-radius: 50%;" />'
+            )
+        return "No Avatar"
+
+    @admin.display(description='Число рецептов')
+    def recipe_count(self, user):
+        return user.recipes.count()
+
+    @admin.display(description='Число подписок')
+    def subscription_count(self, user):
+        return user.users.count()
+
+    @admin.display(description='Число подписчиков')
+    def follower_count(self, user):
+        return user.authors.count()
 
 
 admin.site.register(Subscribe)

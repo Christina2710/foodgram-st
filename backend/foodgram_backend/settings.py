@@ -11,7 +11,6 @@ https://docs.djangoproject.com/en/3.2/ref/settings/
 """
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -23,16 +22,15 @@ AUTH_USER_MODEL = 'recipes.CustomUser'
 
 # SECURITY WARNING: keep the secret key used in production secret!
 
-# Загрузить переменные окружения из файла .env
-load_dotenv()
 
 # Получить значение переменной DJANGO_SECRET_KEY
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
+SECRET_KEY = os.getenv(
+    'SECRET_KEY', 'django-insecure-v51szu(r8v34qvx2pa8i$r!_kaq(b2trc(_j8q8m1$*&u!0fd*')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '127.0.0.1,localhost').split(',')
 
 
 # Application definition

@@ -1,15 +1,11 @@
-from django.db import models
-from django.contrib.auth import get_user_model
-from django.core.validators import MinValueValidator
-
-
-from django.contrib.auth.models import AbstractUser
-from django.db import models
-from django.core.validators import RegexValidator
 from django.conf import settings
+from django.contrib.auth.models import AbstractUser
+from django.core.validators import MinValueValidator, RegexValidator
+from django.db import models
 
 
 MIN_COOKING_TIME = 1
+MIN_AMOUNT = 1
 
 
 class CustomUser(AbstractUser):
@@ -24,7 +20,7 @@ class CustomUser(AbstractUser):
         RegexValidator(
             regex=r'^[\w.@+-]+$',
             message='Имя пользователя может содержать только'
-                  + 'буквы, цифры, и символы: . @ + - _'
+                    'буквы, цифры, и символы: . @ + - _'
         )
     ],
         verbose_name='Имя пользователя'
@@ -40,44 +36,9 @@ class CustomUser(AbstractUser):
     REQUIRED_FIELDS = ('username', 'first_name', 'last_name')
 
     class Meta:
-        ordering = ('first_name', 'last_name')  # Указываем поля для сортировки
+        ordering = ('username', )  # Указываем поля для сортировки
         verbose_name = 'Пользователь'
         verbose_name_plural = 'Пользователи'
-
-
-class Recipe(models.Model):
-    author = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='recipes',
-        verbose_name='Автор рецепта'
-    )
-    name = models.CharField(max_length=256, verbose_name='Название')
-    image = models.ImageField(
-        upload_to='recipes_images',
-        verbose_name='Картинка'
-    )
-    text = models.TextField(verbose_name='Текстовое описание')
-    ingredients = models.ManyToManyField(
-        'Ingredient',
-        through='RecipeIngredient',
-        related_name='recipes_with_ingredient',
-        verbose_name='Ингредиенты',
-    )
-    cooking_time = models.PositiveIntegerField(
-        help_text="Время приготовления в минутах",
-        verbose_name='Время приготовления',
-        validators=(MinValueValidator(MIN_COOKING_TIME),)
-    )
-    pub_date = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        verbose_name = 'рецепт'
-        verbose_name_plural = 'Рецепты'
-        ordering = ('-pub_date',)
-
-    def __str__(self):
-        return self.name
 
 
 class Ingredient(models.Model):
@@ -101,6 +62,41 @@ class Ingredient(models.Model):
         return self.name
 
 
+class Recipe(models.Model):
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='recipes',
+        verbose_name='Автор'
+    )
+    name = models.CharField(max_length=256, verbose_name='Название')
+    image = models.ImageField(
+        upload_to='recipes_images',
+        verbose_name='Картинка'
+    )
+    text = models.TextField(verbose_name='Текстовое описание')
+    ingredients = models.ManyToManyField(
+        Ingredient,
+        through='RecipeIngredient',
+        related_name='recipes',
+        verbose_name='Ингредиенты',
+    )
+    cooking_time = models.PositiveIntegerField(
+        help_text="Время приготовления в минутах",
+        verbose_name='Время приготовления',
+        validators=(MinValueValidator(MIN_COOKING_TIME),)
+    )
+    pub_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'рецепт'
+        verbose_name_plural = 'Рецепты'
+        ordering = ('-pub_date',)
+
+    def __str__(self):
+        return self.name
+
+
 class RecipeIngredient(models.Model):
     recipe = models.ForeignKey(
         Recipe,
@@ -116,7 +112,7 @@ class RecipeIngredient(models.Model):
     )
     amount = models.IntegerField(
         verbose_name='Мера',
-        validators=(MinValueValidator(MIN_COOKING_TIME),)
+        validators=(MinValueValidator(MIN_AMOUNT),)
     )
 
     class Meta:
@@ -150,7 +146,7 @@ class AbstractRecipeRelation(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=['user', 'recipe'],
-                name='unique_user_recipe'
+                name='unique_%(class)s_user_recipe'
             )
         ]
 
@@ -159,13 +155,13 @@ class AbstractRecipeRelation(models.Model):
 
 
 class FavoriteRecipe(AbstractRecipeRelation):
-    class Meta:
+    class Meta(AbstractRecipeRelation.Meta):
         verbose_name = 'избранный рецепт'
         verbose_name_plural = 'Избранные рецепты'
 
 
 class ShoppingCart(AbstractRecipeRelation):
-    class Meta:
+    class Meta(AbstractRecipeRelation.Meta):
         verbose_name = 'рецепт в корзине'
         verbose_name_plural = 'Рецепты в корзине'
 
@@ -175,7 +171,7 @@ class Subscribe(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='subscribed_to_users',
+        related_name='users',
         verbose_name='Пользователь'
     )
     # Это пользователь, на которого совершается подписка

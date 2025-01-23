@@ -1,8 +1,8 @@
 import base64
 from django.core.files.base import ContentFile
+from django.core.validators import MinValueValidator
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
-
 from djoser.serializers import UserSerializer
 
 from recipes.models import Recipe, Ingredient, RecipeIngredient
@@ -39,7 +39,7 @@ class CustomUserSerializer(UserSerializer):
     def get_is_subscribed(self, author):
         user = self.context['request'].user
         is_authenticated = user.is_authenticated
-        is_subscribed = user.subscribed_to_users.filter(
+        is_subscribed = user.users.filter(
             author=author).exists() if is_authenticated else False
         return is_authenticated and is_subscribed
 
@@ -57,7 +57,7 @@ class RecipeBasicSerializer(serializers.ModelSerializer):
     class Meta:
         model = Recipe
         fields = ('id', 'name', 'image', 'cooking_time')
-        read_only_fields = ('id', 'name', 'image', 'cooking_time')
+        read_only_fields = fields
 
 
 class UserDetailSerializer(CustomUserSerializer):
@@ -81,9 +81,9 @@ class UserDetailSerializer(CustomUserSerializer):
             'avatar',
         )
 
-    def get_recipes(self, obj):
+    def get_recipes(self, user):
         return RecipeBasicSerializer(
-            obj.recipes.all()[:int(
+            user.recipes.all()[:int(
                 self.context['request'].query_params.get(
                     'recipes_limit', 10**10
                 )
@@ -111,19 +111,14 @@ class RecipeIngredientSerializer(serializers.ModelSerializer):
         source='ingredient.measurement_unit',
         read_only=True
     )
+    amount = serializers.IntegerField(
+        validators=[MinValueValidator(1)],
+        help_text="Количество должно быть не меньше 1"
+    )
 
     class Meta:
         model = RecipeIngredient
         fields = ('id', 'name', 'measurement_unit', 'amount')
-
-    def validate_measurement_unit(self, value):
-        valid_units = ['г', 'шт', 'кг', 'мл', 'ст. л.', 'ч. л.', 'капля']
-        if value not in valid_units:
-            raise serializers.ValidationError(
-                f"Единица измерения '{value}' недопустима.\n"
-                f"Допустимые значения: {', '.join(valid_units)}."
-            )
-        return value
 
 
 class RecipeSerializer(serializers.ModelSerializer):
@@ -136,6 +131,7 @@ class RecipeSerializer(serializers.ModelSerializer):
         required=True
     )
     image = Base64ImageField(allow_null=True)
+    cooking_time = serializers.IntegerField(validators=[MinValueValidator(1)])
 
     class Meta:
         model = Recipe
@@ -172,34 +168,25 @@ class RecipeSerializer(serializers.ModelSerializer):
         if duplicate_ids:
             raise ValidationError(
                 {'ingredients': f'Ингредиенты не должны повторяться. '
-                                f'Дубли: {", ".join(map(str, duplicate_ids))}'}
+                                f'Дубли: {duplicate_ids}'}
             )
 
         return data
 
-    def validate_cooking_time(self, value):
-        if value < 1:
-            raise serializers.ValidationError(
-                "Время приготовления должно быть не менее 1 минуты.")
-        return value
-
     def save_recipe_ingredients(self, recipe, ingredients_data):
 
         # Удаляем старые ингредиенты
-        RecipeIngredient.objects.filter(recipe=recipe).delete()
+        recipe.recipe_ingredients.all().delete()
 
-        # Создаем новые ингредиенты
-        recipe_ingredients = [
+        # Массовая вставка новых записей
+        RecipeIngredient.objects.bulk_create([
             RecipeIngredient(
                 recipe=recipe,
                 ingredient=ingredient_data['id'],
                 amount=ingredient_data['amount']
             )
             for ingredient_data in ingredients_data
-        ]
-
-        # Массовая вставка новых записей
-        RecipeIngredient.objects.bulk_create(recipe_ingredients)
+        ])
 
     def create(self, validated_data):
         ingredients_data = validated_data.pop('recipe_ingredients')

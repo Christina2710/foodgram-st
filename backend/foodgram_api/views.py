@@ -1,6 +1,5 @@
 from datetime import datetime
-import os
-import tempfile
+from io import BytesIO
 
 from django.db.models import OuterRef, Exists, F, Sum
 from django.shortcuts import get_object_or_404, redirect
@@ -61,11 +60,8 @@ class CustomUserViewSet(UserViewSet):
                 serializer.errors,
                 status=status.HTTP_400_BAD_REQUEST
             )
-        avatar_path = user.avatar.path
 
-        # Проверяем, существует ли файл и если существует, удаляем его
-        if os.path.exists(avatar_path):
-            os.remove(avatar_path)
+        user.avatar.delete(save=False)
 
         # Теперь обнуляем поле аватара в базе данных
         user.avatar = None
@@ -91,7 +87,7 @@ class CustomUserViewSet(UserViewSet):
 
             if not created:
                 return Response(
-                    {'error': 'Вы уже подписаны на данного пользователя!'},
+                    {'error': f'Вы уже подписаны на пользователя {author}!'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -116,7 +112,7 @@ class CustomUserViewSet(UserViewSet):
     def subscriptions(self, request):
         user = request.user
 
-        subscriptions = user.subscribed_to_users.all()
+        subscriptions = user.users.all()
         users = [subscription.author for subscription in subscriptions]
 
         # Пагинация пользователей
@@ -125,14 +121,13 @@ class CustomUserViewSet(UserViewSet):
         paginator.page_size = request.GET.get('limit', 10)
         paginated_users = paginator.paginate_queryset(users, request)
 
-        serializer = UserDetailSerializer(
-            paginated_users,
-            context={'request': request},
-            many=True
+        return paginator.get_paginated_response(
+            UserDetailSerializer(
+                paginated_users,
+                context={'request': request},
+                many=True
+            ).data
         )
-
-        # Формируем ответ с пагинацией
-        return paginator.get_paginated_response(serializer.data)
 
 
 class IngredientViewSet(viewsets.ReadOnlyModelViewSet):
@@ -206,7 +201,7 @@ class RecipeViewSet(viewsets.ModelViewSet):
     def download_shopping_cart(self, request):
         user = request.user
 
-        # Получаем список ингредиентов
+        # Получаем список ингредиентов с сортировкой по названиям
         ingredients = RecipeIngredient.objects.filter(
             recipe__in=user.shoppingcarts.values('recipe')
         ).values(
@@ -214,21 +209,21 @@ class RecipeViewSet(viewsets.ModelViewSet):
             measurement_unit=F('ingredient__measurement_unit')
         ).annotate(
             amount=Sum('amount')
-        )
+        ).order_by('name')  # Добавлена сортировка по названию ингредиента
 
         recipes = user.shoppingcarts.values_list('recipe__name', flat=True)
 
         # Используем функцию рендера для создания содержимого
         content = render_shopping_list(ingredients, recipes)
 
-        # Создаем временный файл
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".txt")
-        temp_file.write(content.encode('utf-8'))
-        temp_file.close()
+        # Создаем поток BytesIO для передачи файла
+        buffer = BytesIO()
+        buffer.write(content.encode('utf-8'))
+        buffer.seek(0)
 
         # Возвращаем файл как ответ
         return FileResponse(
-            open(temp_file.name, 'rb'),
+            buffer,
             as_attachment=True,
             filename=f'Shopping_cart_{datetime.now().strftime("%Y%m%d%H%M%S")}.txt'
         )
@@ -240,7 +235,7 @@ class RecipeViewSet(viewsets.ModelViewSet):
 
         if not exists:
             return Response(
-                {'detail': 'Recipe not found.'},
+                {'detail': f'Рецепт {pk} не найден'},
                 status=status.HTTP_404_NOT_FOUND
             )
 
@@ -252,66 +247,61 @@ class RecipeViewSet(viewsets.ModelViewSet):
 
         return Response({'short-link': short_link})
 
-    @action(detail=True, methods=['post'],
-            permission_classes=[IsAuthenticated])
-    def shopping_cart(self, request, pk):
-        recipe = get_object_or_404(Recipe, id=pk)
-        user = request.user
-        shopping_cart, created = ShoppingCart.objects.get_or_create(
+    @staticmethod
+    def add_to_collection(model_class, user, recipe, error_message):
+        relation, created = model_class.objects.get_or_create(
             user=user,
             recipe=recipe
         )
-        # Проверяем, есть ли уже запись в ShoppingCart
         if not created:
             return Response(
-                {'error': 'Вы уже добавили данный рецепт в список покупок!'},
+                {'error': error_message.format(recipe=recipe)},
                 status=status.HTTP_400_BAD_REQUEST
             )
         serializer = RecipeBasicSerializer(recipe)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @staticmethod
+    def remove_from_collection(user, collection_name, recipe_id):
+
+        get_object_or_404(
+            getattr(user, collection_name), recipe_id=recipe_id).delete()
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def shopping_cart(self, request, pk):
+        recipe = get_object_or_404(Recipe, id=pk)
+        return self.add_to_collection(
+            model_class=ShoppingCart,
+            user=request.user,
+            recipe=recipe,
+            error_message='Вы уже добавили рецепт {recipe} в список покупок!'
+        )
 
     @shopping_cart.mapping.delete
     def delete_shopping_cart(self, request, pk):
         user = request.user
-
-        # Если подписка существует, удаляем её
-        get_object_or_404(
-            user.shoppingcarts,
-            recipe_id=pk,
-        ).delete()
+        self.remove_from_collection(user, 'shoppingcarts', pk)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    @action(detail=True, methods=['post'],
-            permission_classes=[IsAuthenticated])
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def favorite(self, request, pk):
         recipe = get_object_or_404(Recipe, id=pk)
-        user = request.user
-        favorite_recipe, created = FavoriteRecipe.objects.get_or_create(
-            user=user,
-            recipe=recipe
+        return self.add_to_collection(
+            model_class=FavoriteRecipe,
+            user=request.user,
+            recipe=recipe,
+            error_message='Вы уже добавили рецепт {recipe} в избранное!'
         )
-        if not created:
-            return Response(
-                {'error': 'Вы уже добавили данный рецепт в избранное!'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        serializer = RecipeBasicSerializer(recipe)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @favorite.mapping.delete
     def delete_favorite(self, request, pk):
-
         user = request.user
-
-        # Если подписка существует, удаляем её
-        get_object_or_404(
-            user.favoriterecipes,
-            recipe_id=pk,
-        ).delete()
+        self.remove_from_collection(user, 'favoriterecipes', pk)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class RecipeRedirectView(APIView):
-    def get(self, request, recipe_id):
-        # Перенаправляем на детальную страницу рецепта
-        return redirect(f'/api/recipes/{recipe_id}/')
+def recipe_redirect_view(request, recipe_id):
+    # Проверяем, существует ли рецепт с указанным recipe_id
+    recipe = get_object_or_404(Recipe, id=recipe_id)
+    # Перенаправляем на детальную страницу рецепта
+    return redirect(f'/recipes/{recipe.id}/')

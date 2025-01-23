@@ -13,11 +13,11 @@ def render_shopping_list(ingredients, recipes):
     Рендерит список покупок в текстовом формате
     с датой, нумерацией и перечнем рецептов.
     """
-    if not ingredients:
-        return EMPTY_LIST_MESSAGE
-
     # Текущая дата
     date_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    if not ingredients:
+        return EMPTY_LIST_MESSAGE.format(date=date_now)
 
     # Формируем отчет одной операцией
     return '\n'.join([
@@ -27,7 +27,7 @@ def render_shopping_list(ingredients, recipes):
         # Продукты с нумерацией
         *[
             PRODUCT_ITEM.format(
-                index=i + 1,
+                index=i,
                 name=ingredient["name"].capitalize(),
                 amount=ingredient["amount"],
                 unit=ingredient["measurement_unit"]
@@ -36,7 +36,7 @@ def render_shopping_list(ingredients, recipes):
         ],
 
         # Заголовок рецептов, если они есть
-        RECIPE_LIST_HEADER if recipes else '',
+        RECIPE_LIST_HEADER,
 
         # Список рецептов
         *[
